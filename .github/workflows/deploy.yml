@@ -1,51 +1,49 @@
-name: Deploy
-
+name: Add Contributor to AUTHORS.md
 on:
-  push:
-    branches:
-      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
 
 jobs:
-  build:
-    name: Build
+  add_contributor:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Setup Node
-        uses: actions/setup-node@v1
-        with:
-          node-version: 16
-
-      - name: Install dependencies
-        uses: bahmutov/npm-install@v1
-
-      - name: Build project
-        run: npm run build
-
-      - name: Upload production-ready build files
-        uses: actions/upload-artifact@v2
-        with:
-          name: production-files
-          path: ./dist
-
-  deploy:
-    name: Deploy
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: production-files
-          path: ./dist
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+      - name: Check if contributor already exists
+        id: check_contributor
+        run: |
+          exists=$(grep -c -F "$GITHUB_ACTOR" AUTHORS.md)
+          if [[ $exists -gt 0 ]]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Get contributor's full name
+        id: get_full_name
+        if: steps.check_contributor.outputs.exists == 'false'
+        run: |
+          username=$GITHUB_ACTOR
+          access_token=$GITHUB_TOKEN
+          full_name=$(curl -s -H "Authorization: token $access_token" "https://api.github.com/users/$username" | jq -r '.name')
+          if [[ -z "$full_name" ]]; then
+            full_name=$username
+          fi
+          echo "full_name=$full_name" >> $GITHUB_OUTPUT
+      - name: Append contributor to AUTHORS.md
+        id: append_contributor
+        if: steps.check_contributor.outputs.exists == 'false'
+        run: |
+          full_name=${{ steps.get_full_name.outputs.full_name }}
+          echo "| $full_name | $GITHUB_ACTOR |" >> AUTHORS.md
+      - name: Commit and push changes
+        if: steps.check_contributor.outputs.exists == 'false'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add AUTHORS.md
+          git commit -m "Add $GITHUB_ACTOR to AUTHORS.md"
+          git push
